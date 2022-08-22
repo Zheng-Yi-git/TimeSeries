@@ -1,0 +1,362 @@
+---
+title: "Analysis of Air Quality"
+subtitle: "Project of Time Series Analysis"
+author: "Yi Zheng 2020012859"
+date: "2022/5/24"
+output: 
+    pdf_document: 
+      latex_engine: xelatex
+      toc: yes
+      number_sections: yes
+      fig_height: 4
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+\newpage
+# Introduction and Background 
+
+A substantial part of China is experiencing air pollution with severe fine particulate matter (PM) concentration and PM2.5 in particular, which refers to the fine PM with aerodynamic diameter of less than 2.5 $μm$. The north China Plain (NCP) that surrounds Beijing endures the most severe air pollution in the country with excessive PM2.5 concentration. In an attempt to clear up the smog, China’s State Council has set a 25\% PM2.5 reduction target for the NCP by 2017 relative to the 2012 level, and a specific target of no more than 60 $μg\cdot m^{−3}$ for Beijing’s annual average.
+
+
+## Relative Research
+
+Zhang et al. (2017) conducted statistical analyses on the PM2.5 data of the past 4 years from Beijing’s 36 monitoring sites in conjunction with 7 years’ meteorological records at 15 stations. They wanted to provide meaning and insight to the official statistics and a broader understanding of the air pollution situation in Beijing. To this end, they considered:
+\begin{itemize}
+\item two types of years, the calendar year and the seasonal year;
+\item two types of monitoring sites, the 11 Guokong sites and more sites in central Beijing to provide wider spatial coverage;
+\item two types of averages: the simple average and an adjusted average constructed under a standardized baseline meteorological condition.
+\end{itemize}
+Having these three perspectives in the analyses leads to a fuller view on Beijing’s PM2.5 pollution in the past 4 years and 2016 in particular.
+The pollutant that affects people the most is particulate matter, usually abbreviated as PM and used as a measure of air pollution. Although particles with a diameter of 10 microns or less ($\leq$PM10) can penetrate and embed deep in the lungs, the ones that are more harmful to health are those with a diameter of 2.5 microns or less ($\leq$PM2.5).
+
+\
+
+In this study, we will try to focus on `O3`, another important indicator of air quality. We will build models to give predictions, as well as exploring the relations between `O3` and other indicators.
+
+\newpage
+# Data Loading and Cleaning
+
+## Overview of the Complete Data Set
+The complete data set includes hourly air pollutants data from 12 nationally-controlled air quality monitoring sites. The air quality data are from the Beijing Municipal Environmental Monitoring Center (BMEMC). The meteorological data in each air quality site are matched with the nearest weather station from the China Meteorological Administration. The time period is from March 1st, 2013 to February 28th, 2017. Missing data are denoted as NA.
+
+The city of Beijing established an air pollution monitoring network in January 2013 as part of the
+national monitoring network. There are 36 air-quality monitoring sites in Beijing, 35 of which are
+BMEMC sites and one at the US Embassy in Beijing.
+
+```{r pressure, echo=FALSE, fig.cap="Location of the monitoring sites", out.width = '50%', fig.align='center'}
+knitr::include_graphics("loc.png")
+```
+
+The meteorological data consist of 6 hourly observed
+variables: air temperature, wind direction (WD) and speed, pressure, relative humidity (or dew
+point temperature, DEW) and precipitation, from March 2010 to February 2017. The reason for
+using three more years’ meteorological data is for a better construction of a spatial and temporal
+baseline weather condition over the study region.
+
+As there were many missing values in January and February of 2013 in most sites when
+Beijing’s air-quality monitoring network was first put in operation, we consider the seasonal year,
+namely hourly PM2.5 data ranging from March 2013 to February 2017 that makes up four seasonal
+years. As mentioned earlier, an advantage of using the seasonal year is that it keeps the winter
+season intact without breaking it into two separate years. The time unit of the study is season,
+which consists of segments of three months starting from March, June, September and December,
+which represent the four seasons of spring, summer, autumn and winter, respectively.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=6}
+library(readr)
+library(zoo)
+library(plyr)
+library(xts)
+library(forecast)
+library(tseries)
+library(TSA)
+library(stats)
+aotizhongxin = read_csv("data/PRSA_Data_Tiantan_20130301-20170228.csv")
+print("Head of the complete data set")
+head(aotizhongxin)
+aotizhongxin = aotizhongxin[, -1]
+yearstr = as.character(aotizhongxin$year)
+monthstr = as.character(aotizhongxin$month)
+daystr = as.character(aotizhongxin$day)
+for (i in 1:length(monthstr)){
+  if (nchar(monthstr[i]) == 1){
+    monthstr[i] = paste("0", monthstr[i], sep = "")
+  }
+}
+timestr = paste(yearstr, "-", monthstr, "-", daystr, sep = "")
+yearmonth = paste(yearstr, "-", monthstr, sep = "")
+aotizhongxin$time = as.Date(timestr)
+aotizhongxin = aotizhongxin[, -15]
+aotizhongxin = aotizhongxin[, -16]
+aotizhongxin = aotizhongxin[, c(-2, -3, -4)]
+aotizhongxin = aotizhongxin[, -1]
+aotizhongxin.data = aotizhongxin
+aotizhongxin = xts(aotizhongxin[, -12], order.by = as.Date(aotizhongxin$time))
+
+plot(as.zoo(aotizhongxin), ylim = c(1, 1000), main = "Overview of the complete data")
+```
+
+## Data Preprocessing and Transformation
+
+As a methodological example, this study only chose one of the 12 data sets to analyse, and the method applied to this data set can be conveniently transferred to other data sets.
+
+Since we only learned how to deal with small scale of data in the class, we here transformed the data into monthly data for convenience.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height=6}
+# aotizhongxin = ddply(aotizhongxin, as.quoted(as.character(aotizhongxin$time)), na.locf)
+# aotizhongxin = zoo(aotizhongxin[, -12], order.by = as.Date(as.character(aotizhongxin$time), format = '%Y-%m-%d'))
+aotizhongxin = na.locf(aotizhongxin)
+aotizhongxin.data[, 1:11] = aotizhongxin[, 1:11]
+aotizhongxin = aotizhongxin.data
+aotizhongxin$time = yearmonth
+# aotizhongxin[, -12] = apply(aotizhongxin[, -12], 2, as.numeric)
+# aotizhongxin[, 12] = as.Date(aotizhongxin[, 12])
+aotizhongxin.data = aggregate(aotizhongxin[, 1:11], by = list(aotizhongxin$time), mean)
+print("Head of the transformed data")
+head(aotizhongxin.data)
+Sys.setlocale("LC_TIME", "English") 
+```
+
+The data frame after transformation is $48\times 12$.
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+#library(xts)
+#plot.ts(aotizhongxin.data$O3)
+#plot.xts(aotizhongxin.xts$PM2.5)
+#plot.xts(aotizhongxin.xts$PM10)
+#plot.xts(aotizhongxin.xts$SO2)
+#plot.xts(aotizhongxin.xts$NO2)
+#plot.xts(aotizhongxin.xts$CO)
+#plot.xts(aotizhongxin.xts$O3)
+#plot.xts(aotizhongxin.xts$TEMP)
+#plot.xts(aotizhongxin.xts$PRES)
+#plot.xts(aotizhongxin.xts$DEWP)
+#plot.xts(aotizhongxin.xts$RAIN)
+#plot.xts(aotizhongxin.xts$WSPM)
+```
+
+\newpage
+# Data Analysis and Model Selection
+
+In this part, we only use the first 43 data of sequence as our training data to build a model and the last five data as validation for our prediction.
+
+## ARIMA Model for `O3` Data
+
+### Stationarity Test
+
+First we may plot the data sequence.
+
+```{r}
+O3 = aotizhongxin.data$O3
+O3 = O3[1:43]
+plot.ts(O3)
+```
+
+
+By doing ADF test, we may get the results below.
+
+```{r, echo=FALSE, warning=FALSE}
+adf.test(O3)
+```
+
+Therefore, it is safe to reject the null hypothesis and confirm that the sequence is stationary, then we can just build a model based on the original data without any transformation.
+
+### Specification
+
+The sample ACF, PACF and EACF are plotted as below.
+
+```{r, echo=FALSE, fig.height=6}
+par(mfrow = c(2, 1))
+acf(O3, lag.max = 100)
+pacf(O3, lag.max = 100)
+eacf(O3)
+```
+
+The sample EACF suggests that ARMA(2, 1) may be a good choice, so we can pick up this model first and try to estimate its parameters.
+
+### Estimation
+
+```{r}
+model1 = stats::arima(O3, order = c(2, 0, 1), include.mean = T)
+model1
+```
+
+### Diagnostic
+
+```{r, fig.height=6, echo=FALSE}
+tsdiag(model1)
+```
+
+```{r, echo=FALSE, fig.height=2.6}
+pacf(model1$residuals)
+qqnorm(model1$residuals)
+```
+
+From the normal Q-Q plot, we can see that the residuals almost satisfy normal distribution. But from the ACF and PACF of the residuals, we may find that at some lag, the value is a little bit large, about 0.3 or so, which is not a really big problem. Also, the p-value of the Box test at lag 3 and 4 are close to 0.05, which means the null hypothesis is not that reliable.
+
+### Forecasting and Validation
+
+```{r}
+model1.forecast = forecast::forecast(model1, h = 5, level = 0.95)
+plot.ts(aotizhongxin.data$O3, ylim = c(0, 103), ylab = "O3", main = "True value")
+plot(model1.forecast)
+```
+
+The true value have more drastic change than the predicted value, therefore a better model should be considered.
+
+
+\newpage
+## Seasonal ARIMA Model for `O3` Data
+
+From empirical knowledge and the sequence plot above, seasonal ARIMA model seems to be a better choice to analyse this problem, since the data shows a seasonal period about 12.
+
+### Transformation and Stationarity Test
+
+After differencing the sequence at lag 1 and lag 12 (i.e. $(1-B^{12})(1-B)y_t$), the new sequence is stationary.
+
+```{r}
+O3.diff12 = diff(O3, lag = 12)
+O3.diff12 = diff(O3.diff12)
+adf.test(O3.diff12)
+plot.ts(O3.diff12)
+```
+
+
+### Specification
+
+```{r}
+acf(O3.diff12, lag.max = 100)
+pacf(O3.diff12, lag.max = 100)
+```
+
+Here we have chosen $period=12$, and $d = D = 1$. From the ACF plot, it has relatively large value at lag 1 and lag 12, therefore the model contains MA(1) component and seasonal MA(1) component. From the PACF plot, only at lag 1 do we find a relatively large value, therefore the model contains AR(1) component. In conclusion, ARIMA(1, 1, 1)$\times$(0, 1, 1)$_{12}$ should be considered the possible proper model.
+
+### Estimation
+
+```{r}
+model2 = stats::arima(O3, order = c(1, 1, 1), seasonal = list(order = c(0, 1, 1), period = 12), include.mean = T)
+model2
+```
+
+
+Here, the AIC is much less than the ordinary ARIMA model in the last part, and should be a better model.
+
+### Diagnostic
+```{r, echo=FALSE, fig.height=2.4}
+pacf(model2$residuals)
+qqnorm(model2$residuals)
+```
+
+```{r, fig.height=6, echo=FALSE}
+tsdiag(model2)
+```
+
+The ACF and PACF still have some relatively large value, and the normal Q-Q plot seems worse than the ARIMA model. At lag 2, the p-value of Box test is almost 0.05, which is not that good. But we should see the forecasting part to judge whether the model is effective.
+
+### Forecasting and Validation
+
+```{r, fig.height=3.5}
+model2.forecast = forecast::forecast(model2, h = 5, level = 0.95)
+plot.ts(aotizhongxin.data$O3, ylim = c(0, 103), ylab = "O3")
+```
+
+```{r, fig.height=3.5}
+plot(model2.forecast)
+```
+
+The forecasting gives us a promising result, showing drastic change like true value.
+
+\newpage
+## VAR Model for `PM2.5`, `SO2` and `O3` Data
+
+Since there are so many indicators of air quality, we are also interested in whether they (or part of them) are correlated. Luckily, VAR model may be a powerful tool for us to get a deep insight into the correlation of the indicators. In this part, we use three pieces of data, which are `PM2.5`, `SO2` and `O3`, to analyse their potential correlation. The sequences are plotted as follows.
+
+```{r, warning=FALSE}
+ts.three = ts(as.matrix(aotizhongxin.data[1:43, c("PM2.5", "SO2", "O3")]), start = c(2013, 3), frequency = 12)
+plot(as.xts(ts.three), multi.panel = T, main = "Three indicators of air quality")
+```
+
+### Specification
+
+The information of VAR(1) to VAR(5) are listed as follows.
+
+```{r}
+library(MTS)
+Z = coredata(as.xts(ts.three))
+VARorder(Z, maxp = 5)
+```
+
+Here, though the result of AIC suggests that VAR(4) may be good, but the p-value tells us that it may not be that significant. Therefore, VAR(2) is selected.
+
+### Estimation
+
+```{r}
+model3 = MTS::VAR(Z, 2)
+```
+
+### Diagnostic
+
+```{r, echo=FALSE}
+resi = model3$residuals
+MTS::mq(resi, adj = 3^2 * 2)
+```
+
+The Box test shows that it's safe to say that the residuals are white noise, and the model can be used confidently.
+
+### Simplification
+
+As the VAR(2) needs too many parameters, we may restrict some non-significant parameters to 0 to decrease the complexity of the model. Here, we set the threshold as 1.96 (5\% significance level for t-test).
+
+```{r}
+model4 = refVAR(model3, thres = 1.96)
+```
+The AIC and BIC of the simplified model are both smaller than the primal model, therefore the new one is better. Note that here 9 parameters have been restricted to 0.
+
+### Granger Causality Test
+
+We can also do Granger causality test based on the model above.
+
+```{r}
+print("PM2.5")
+GrangerTest(Z, p=2, locInput = 1)
+```
+
+```{r}
+print("SO2")
+GrangerTest(Z, p=2, locInput = 2)
+```
+
+```{r}
+print("O3")
+GrangerTest(Z, p=2, locInput = 3)
+```
+
+From the results above, the conclusions should be: at 5\% significance level, `O3` can be regarded as the one-way Granger cause of `SO2` and `PM2.5`.
+
+### Forecasting and Validation
+
+```{r}
+model4.fore = VARpred(model4, 5)
+model4.result = rbind(as.matrix(aotizhongxin.data[1:43, c("PM2.5", "SO2", "O3")]), model4.fore$pred)
+plot(as.xts(ts(model4.result, start = c(2013, 3), frequency = 12)), multi.panel = T, main = "Three indicators of air quality (forecast)")
+ts.three1 = ts(as.matrix(aotizhongxin.data[, c("PM2.5", "SO2", "O3")]), start = c(2013, 3), frequency = 12)
+plot(as.xts(ts.three1), multi.panel = T, main = "Three indicators of air quality (true value)")
+```
+
+Only in the sequence of `PM2.5` do we have a relatively big bias, the other 2 sequences are predicted well. But it's understandable since the true value of `PM2.5` sequence in our prediction window is a "peak" and is really hard to predict.
+
+\newpage
+# Conclusion
+
+This project built a ARIMA model and a seasonal ARIMA model for the `O3` data, and found that the seasonal ARIMA model performed better at forecasting. Also, through VAR model, we found that `O3` can be regarded as the one-way Granger cause of `SO2` and `PM2.5`.
+
+# Reference
+
+\begin{enumerate}
+\item Zhang, S., Guo, B., Dong, A., He, J., Xu, Z. and Chen, S.X. (2017) Cautionary Tales on Air-Quality Improvement in Beijing. Proceedings of the Royal Society A, Volume 473, No. 2205, Pages 20170457.
+\item Dongfeng Li, Lecture Notes of Financial Time Series Analysis, can be accessed with:\\ $https://www.math.pku.edu.cn/teachers/lidf/course/fts/ftsnotes/html/\_ftsnotes/index.html$.
+\end{enumerate}
+
+
